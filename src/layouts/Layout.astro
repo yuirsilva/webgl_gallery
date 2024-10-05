@@ -1,0 +1,84 @@
+---
+import Head from "@components/Head.astro";
+import RealViewport from "@components/RealViewport.astro";
+
+interface Props {
+    title: string;
+    description?: string;
+    ogImage?: string;
+}
+
+const {
+    title,
+    description = "Creative Developer.",
+    ogImage = "/default-opengraph.png",
+} = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+    <Head title={title} description={description} ogImage={ogImage} />
+    <body>
+        <main>
+            <slot />
+        </main>
+        <RealViewport />
+    </body>
+</html>
+
+<style>
+    * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+    }
+
+    html::-webkit-scrollbar {
+        display: none;
+    }
+
+    html {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+    }
+
+    html.lenis,
+    html.lenis body {
+        height: auto;
+    }
+
+    .lenis.lenis-smooth {
+        scroll-behavior: auto !important;
+    }
+
+    .lenis.lenis-smooth [data-lenis-prevent] {
+        overscroll-behavior: contain;
+    }
+
+    .lenis.lenis-stopped {
+        overflow: hidden;
+    }
+
+    .lenis.lenis-smooth iframe {
+        pointer-events: none;
+    }
+
+    @font-face {
+        font-family: "Helvetica";
+        src: url("/fonts/HelveticaNowVar.woff2") format("woff2");
+        font-style: normal;
+        font-weight: 400;
+        font-display: swap;
+    }
+
+    html,
+    body,
+    main {
+        width: 100%;
+        height: 100%;
+    }
+
+    html {
+        font-family: "Helvetica", sans-serif;
+    }
+</style>

@@ -1,0 +1,66 @@
+---
+import Layout from "@/layouts/Layout.astro";
+import Experience from "@components/Experience.astro";
+import { Image } from "astro:assets";
+
+import IMG_00 from "@/assets/00.jpg";
+import IMG_01 from "@/assets/01.jpg";
+import IMG_02 from "@/assets/02.jpg";
+import IMG_03 from "@/assets/03.jpg";
+import IMG_04 from "@/assets/04.jpg";
+import IMG_05 from "@/assets/05.jpg";
+import IMG_06 from "@/assets/06.jpg";
+---
+
+<Layout title="WebGL Gallery">
+    <section class="gallery_section">
+        <Experience />
+        <div class="gallery">
+            <Image src={IMG_00} alt="Gallery image" />
+            <Image src={IMG_01} alt="Gallery image" />
+            <Image src={IMG_02} alt="Gallery image" />
+            <Image src={IMG_03} alt="Gallery image" />
+            <Image src={IMG_04} alt="Gallery image" />
+            <Image src={IMG_05} alt="Gallery image" />
+            <Image src={IMG_06} alt="Gallery image" />
+        </div>
+        <footer class="gallery-footer">
+            <p>YURI SILVA</p>
+            <p class="gallery-text">INFINITE GALLERY</p>
+            <p>—2024</p>
+        </footer>
+    </section>
+</Layout>
+
+<style>
+    .gallery {
+        display: flex;
+        gap: 2rem;
+        height: calc(var(--vh) * 50);
+        padding-top: calc(var(--vh) * 25);
+        opacity: 0;
+        pointer-events: none;
+        user-select: none;
+
+        & img {
+            height: 100%;
+            object-fit: cover;
+        }
+    }
+
+    .gallery-footer {
+        display: flex;
+        justify-content: space-between;
+        width: calc(100% - 40px);
+        text-transform: uppercase;
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        margin: 0;
+
+        & p {
+            margin: 0;
+        }
+    }
+</style>

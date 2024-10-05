@@ -1,0 +1,14 @@
+{
+    "extends": "astro/tsconfigs/strictest",
+    "compilerOptions": {
+        "allowJs": true,
+        "baseUrl": ".",
+        "strictPropertyInitialization": false,
+        "paths": {
+            "@components/*": ["src/components/*"],
+            "@/*": ["src/*"]
+        },
+        "types": ["vite-plugin-glsl/ext"]
+    },
+    "exclude": ["node_modules"]
+}

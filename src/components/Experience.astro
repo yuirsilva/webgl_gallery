@@ -1,0 +1,412 @@
+<div id="container"></div>
+
+<style>
+    #container {
+        width: 100%;
+        height: calc(var(--vh) * 100);
+        position: fixed;
+    }
+</style>
+
+<script>
+    import imagesLoaded from "imagesloaded";
+
+    import * as THREE from "three";
+
+    import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+    import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+    import { OutputPass } from "three/addons/postprocessing/OutputPass.js";
+    import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
+
+    import fragment from "@/shaders/fragment.glsl";
+    import vertex from "@/shaders/vertex.glsl";
+    import gsap from "gsap";
+    import Lenis from "lenis";
+
+    history.scrollRestoration = "manual";
+    window.scrollTo({ top: 0, left: 0 });
+
+    interface SketchInterface {
+        dom: HTMLDivElement;
+    }
+
+    interface ImageStore {
+        top: number;
+        left: number;
+        width: number;
+        height: number;
+        mesh: THREE.Mesh;
+
+        extra: number;
+        isAfter: boolean;
+        isBefore: boolean;
+    }
+
+    interface EffectShader {
+        name?: string;
+        uniforms: {
+            tDiffuse: THREE.IUniform;
+        };
+        vertexShader: string;
+        fragmentShader: string;
+    }
+
+    class Sketch {
+        time: {
+            then: number;
+            delta: number;
+            now: number;
+        };
+
+        width: number;
+        height: number;
+
+        scroll: {
+            direction: number;
+            enable: number;
+        };
+        padding: number;
+
+        geometry: THREE.PlaneGeometry;
+        material: THREE.ShaderMaterial;
+        materials: THREE.ShaderMaterial[];
+        mesh: THREE.Mesh;
+
+        galleryBounds: number;
+        imageStore: ImageStore[];
+        images: Array<HTMLImageElement>;
+
+        lenis: Lenis;
+        scene: THREE.Scene;
+        dom: HTMLDivElement;
+
+        renderer: THREE.WebGLRenderer;
+        composer: EffectComposer;
+
+        renderPass: RenderPass;
+        outputPass: OutputPass;
+        customEffectPass: ShaderPass;
+        customEffect: EffectShader;
+
+        camera: THREE.PerspectiveCamera;
+
+        raycaster: THREE.Raycaster;
+        intersects: THREE.Intersection<
+            THREE.Object3D<THREE.Object3DEventMap>
+        >[];
+        pointer: THREE.Vector2;
+
+        constructor(options: SketchInterface) {
+            this.dom = options.dom;
+
+            this.time = {
+                then: 0,
+                delta: 0,
+                now: 0,
+            };
+
+            this.scroll = {
+                direction: 1,
+                enable: 1,
+            };
+
+            this.padding = 32;
+
+            this.width = this.dom.offsetWidth;
+            this.height = this.dom.offsetHeight;
+
+            this.scene = new THREE.Scene();
+
+            this.camera = new THREE.PerspectiveCamera(
+                70,
+                this.width / this.height,
+                100,
+                800
+            );
+            this.camera.position.z = 600;
+            this.camera.fov =
+                Math.atan(this.height / 2 / this.camera.position.z) *
+                2 *
+                (180 / Math.PI);
+
+            this.renderer = new THREE.WebGLRenderer({
+                alpha: true,
+                // antialias: true,
+            });
+            this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            this.renderer.setSize(this.width, this.height);
+            this.dom.appendChild(this.renderer.domElement);
+
+            this.images = [...document.querySelectorAll("img")];
+            this.galleryBounds =
+                document.querySelector<HTMLDivElement>(".gallery")!.scrollWidth;
+
+            const preloadImages = new Promise((resolve) => {
+                imagesLoaded(this.images, { background: true }, resolve);
+            });
+
+            this.raycaster = new THREE.Raycaster();
+            this.pointer = new THREE.Vector2(0, 0);
+
+            Promise.all([preloadImages]).then(() => {
+                // this could be removed tbh (lenis aint doin shit)
+                this.lenis = new Lenis();
+
+                this.setupMouseMove();
+                this.setupClick();
+                this.setupScroll();
+
+                this.createImages();
+                this.setPosition();
+
+                this.resize();
+                this.setupResize();
+
+                this.setupComposer();
+                this.render(this.time.now);
+            });
+        }
+
+        setupClick() {
+            addEventListener("click", () => {
+                gsap.to(this.scroll, {
+                    enable: !this.scroll.enable,
+                    duration: 0.4,
+                });
+            });
+        }
+
+        setupComposer() {
+            this.composer = new EffectComposer(this.renderer);
+
+            this.renderPass = new RenderPass(this.scene, this.camera);
+            this.composer.addPass(this.renderPass);
+
+            this.customEffect = {
+                uniforms: {
+                    tDiffuse: { value: null },
+                },
+                fragmentShader: `
+                    uniform sampler2D tDiffuse;
+
+                    varying vec2 vUv;
+
+                    float parabola( float x, float k ){
+                        return pow( 4.0*x*(1.0-x), k );
+                    }
+
+                    void main() {
+                        vec2 uv = vUv;
+
+                        float t = parabola(uv.x, 0.5);
+                        t = pow(1. - t, 4.) * 0.05;
+
+                        uv.x -= (uv.x - 0.5) * t; 
+
+                        gl_FragColor = texture2D(tDiffuse, uv);
+                    }
+                `,
+                vertexShader: `
+                    varying vec2 vUv;
+
+                    void main() {
+                        vUv = uv;
+
+                        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.);
+                    }
+                `,
+            };
+
+            this.customEffectPass = new ShaderPass(this.customEffect);
+            this.composer.addPass(this.customEffectPass);
+        }
+
+        setupMouseMove() {
+            let lastIntersectedObject: THREE.Mesh<
+                THREE.PlaneGeometry,
+                THREE.ShaderMaterial
+            > | null = null;
+
+            addEventListener("pointermove", (e) => {
+                this.pointer.x = (e.clientX / this.width) * 2 - 1;
+                this.pointer.y = -(e.clientY / this.height) * 2 + 1;
+
+                if (this.intersects.length > 0) {
+                    let obj = this.intersects[0]?.object as THREE.Mesh<
+                        THREE.PlaneGeometry,
+                        THREE.ShaderMaterial
+                    >;
+
+                    gsap.to(obj.material.uniforms.hoverState!, {
+                        value: 1,
+                    });
+
+                    gsap.to(obj.material.uniforms.point!.value, {
+                        x: this.intersects[0]!.uv!.x,
+                        y: this.intersects[0]!.uv!.y,
+                        duration: 0.4,
+                    });
+
+                    if (
+                        lastIntersectedObject &&
+                        lastIntersectedObject !== obj
+                    ) {
+                        gsap.to(
+                            lastIntersectedObject.material.uniforms.hoverState!,
+                            {
+                                value: 0,
+                            }
+                        );
+                    }
+
+                    lastIntersectedObject = obj;
+                } else {
+                    if (lastIntersectedObject) {
+                        gsap.to(
+                            lastIntersectedObject.material.uniforms.hoverState!,
+                            {
+                                value: 0,
+                            }
+                        );
+                        lastIntersectedObject = null;
+                    }
+                }
+            });
+        }
+
+        setupScroll() {
+            this.lenis.on("virtual-scroll", (data) => {
+                gsap.to(this.scroll, {
+                    direction: data.deltaY * 0.01,
+                    ease: "none",
+                    duration: 0.5,
+                });
+            });
+        }
+
+        createImages() {
+            this.material = new THREE.ShaderMaterial({
+                uniforms: {
+                    image: { value: 0 },
+                    point: { value: new THREE.Vector2(0, 0) },
+                    hoverState: { value: 0 },
+                },
+                fragmentShader: fragment,
+                vertexShader: vertex,
+                transparent: true,
+            });
+            this.geometry = new THREE.PlaneGeometry(1, 1, 80, 80);
+
+            this.imageStore = this.images.map((img) => {
+                let bounds = img.getBoundingClientRect();
+
+                let tex = new THREE.Texture(img);
+                tex.generateMipmaps = false;
+                tex.needsUpdate = true;
+
+                let geometry = this.geometry.clone();
+
+                let material = this.material.clone();
+                material.uniforms.image!.value = tex;
+
+                let mesh = new THREE.Mesh(geometry, material);
+                mesh.scale.set(bounds.width, bounds.height, 1);
+                this.scene.add(mesh);
+
+                return {
+                    top: bounds.top,
+                    left: bounds.left,
+                    width: bounds.width,
+                    height: bounds.height,
+                    mesh: mesh,
+                    extra: 0,
+                    isAfter: false,
+                    isBefore: false,
+                };
+            });
+        }
+
+        setPosition() {
+            this.imageStore.forEach((image) => {
+                image.mesh.position.x =
+                    image.left - this.width / 2 + image.width / 2;
+
+                image.mesh.position.y = (Math.random() * 2 - 1) * 100;
+                // don't needs this rn
+                // img.mesh.position.y =
+                //     img.top + this.height / 2 - img.height / 2;
+            });
+        }
+
+        setupResize() {
+            addEventListener("resize", this.resize.bind(this));
+        }
+
+        resize() {
+            this.width = this.dom.offsetWidth;
+            this.height = this.dom.offsetHeight;
+
+            this.setPosition();
+
+            this.renderer.setSize(this.width, this.height);
+
+            this.camera.aspect = this.width / this.height;
+            this.camera.updateProjectionMatrix();
+        }
+
+        render(time: number) {
+            this.lenis.raf(time);
+            this.time.now += 0.05;
+
+            this.time.delta = this.time.now - this.time.then;
+            this.time.then = this.time.now;
+
+            this.raycaster.setFromCamera(this.pointer, this.camera);
+            this.intersects = this.raycaster.intersectObjects(
+                this.scene.children
+            );
+
+            this.imageStore.forEach((image) => {
+                const meshOffset = image.width * 0.5;
+                const windowOffset = this.width * 0.5;
+
+                image.mesh.position.x -=
+                    this.time.delta *
+                    this.padding *
+                    2 *
+                    this.scroll.direction *
+                    this.scroll.enable;
+
+                // -meshOffset = as if the pivot point is on the planes right
+                // +meshOffset = as if the pivot point is on the planes left
+                image.isAfter =
+                    image.mesh.position.x + meshOffset < -windowOffset;
+                image.isBefore =
+                    image.mesh.position.x - meshOffset > windowOffset;
+
+                if (image.isAfter) {
+                    image.extra = this.galleryBounds;
+                    image.mesh.position.x += image.extra + this.padding;
+
+                    image.isAfter = false;
+                    image.isBefore = false;
+                }
+
+                if (image.isBefore) {
+                    image.extra = this.galleryBounds;
+                    image.mesh.position.x -= image.extra + this.padding;
+
+                    image.isAfter = false;
+                    image.isBefore = false;
+                }
+            });
+
+            this.composer.render();
+            requestAnimationFrame(this.render.bind(this));
+        }
+    }
+
+    new Sketch({
+        dom: document.getElementById("container") as HTMLDivElement,
+    });
+</script>
